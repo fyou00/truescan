@@ -1,6 +1,6 @@
 # TrueScan
 
-TrueScan uses Python and OpenCV to detect document corners and rectify a page from an original-resolution photo.
+TrueScan uses Python and OpenCV to detect document corners, rectify a page from an original-resolution photo, and enhance the rectified page.
 
 ## Setup and tests
 
@@ -39,6 +39,18 @@ page = correctPerspective(image, corners)
 ```
 
 On the synthetic 1801 × 1133 photo in `tests/test_perspective.py`, an axis-aligned crop of the detected outline leaves the four colored marker centers displaced from their reference positions. The largest error falls from 0.1382 after cropping to 0.0028 after rectification. Error is Euclidean distance after normalizing x and y by the respective pixel spans of each output. The rectified page measures 1170 × 797 pixels in this run.
+
+## Page enhancement
+
+Pass the rectified page to `enhancePage` to reduce shadows and improve local contrast and sharpness. The output keeps the page dimensions and its grayscale, BGR, or BGRA format, including the original alpha channel.
+
+```python
+from truescan.enhance import enhancePage
+
+enhanced = enhancePage(page)
+```
+
+See the [synthetic before-and-after evaluation](docs/ENHANCEMENT.md) for results and reproduction instructions.
 
 ## Initial evaluation
 
