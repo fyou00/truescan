@@ -10,6 +10,7 @@
     <title>Pindai dokumen · TrueScan</title>
     <link rel="stylesheet" href="style.css">
     <script src="app.js" defer></script>
+    <script src="corners.js" defer></script>
 </head>
 <body>
     <a class="skip" href="#scanner">Langsung ke pemindai</a>
@@ -60,6 +61,24 @@
                 </div>
                 <video id="camera-preview" autoplay playsinline muted hidden aria-label="Pratinjau kamera"></video>
                 <canvas id="page-preview" hidden aria-label="Pratinjau foto dokumen"></canvas>
+                <div id="corner-overlay" hidden tabindex="0" role="group" aria-label="Empat sudut dokumen" aria-describedby="corner-message">
+                    <svg aria-hidden="true" preserveAspectRatio="none">
+                        <polyline id="corner-outline" vector-effect="non-scaling-stroke"/>
+                    </svg>
+                </div>
+                <img id="corrected-preview" hidden alt="Pratinjau dokumen yang sudah diluruskan">
+            </div>
+            <div id="corner-tools" hidden>
+                <div class="corner-help">
+                    <h3 id="corner-heading">Sudut dokumen</h3>
+                    <p id="corner-message" role="status"></p>
+                </div>
+                <div class="actions">
+                    <button type="button" class="button" id="reset-corners">Pilih ulang</button>
+                    <button type="button" class="button" id="detect-corners">Deteksi lagi</button>
+                    <button type="button" class="button primary" id="apply-corners" disabled>Luruskan halaman</button>
+                    <button type="button" class="button" id="edit-corners" hidden>Edit sudut</button>
+                </div>
             </div>
             <div class="status-bar">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 11v5m0-8v.1"/></svg>

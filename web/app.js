@@ -32,11 +32,16 @@ function releaseCamera() {
   emptyPreview.hidden = hasPage;
 }
 
-function cancelCamera(message) {
+function notifyPage(eventName) {
+  if (hasPage) document.dispatchEvent(new Event(eventName));
+}
+
+function cancelCamera(message, pageEvent = "page-resume") {
   requestNumber++;
   releaseCamera();
   statusMessage.textContent = message;
   openCamera.focus();
+  notifyPage(pageEvent);
 }
 
 function drawPage(source, width, height) {
@@ -60,9 +65,11 @@ openCamera.addEventListener("click", async () => {
   const request = ++requestNumber;
   releaseCamera();
   if (!navigator.mediaDevices?.getUserMedia) {
+    notifyPage("page-resume");
     statusMessage.textContent = "Kamera tidak tersedia di browser ini. Pilih Impor foto.";
     return;
   }
+  notifyPage("page-suspend");
   openCamera.hidden = true;
   stopCamera.hidden = false;
   statusMessage.textContent = "Menunggu izin kamera…";
@@ -111,7 +118,7 @@ takePhoto.addEventListener("click", () => {
   }
   try {
     drawPage(video, video.videoWidth, video.videoHeight);
-    cancelCamera("Foto berhasil diambil.");
+    cancelCamera("Foto berhasil diambil.", "page-ready");
   } catch {
     cancelCamera("Foto gagal diambil. Buka kamera kembali atau pilih Impor foto.");
   }
@@ -133,12 +140,14 @@ photoFile.addEventListener("change", async () => {
   photoFile.value = "";
   const request = ++requestNumber;
   releaseCamera();
+  notifyPage("page-suspend");
   statusMessage.textContent = "Membuka foto…";
   let url;
   try {
     const supported = await hasSupportedFormat(file);
     if (request !== requestNumber) return;
     if (!supported) {
+      notifyPage("page-resume");
       statusMessage.textContent = "Format foto tidak didukung. Pilih JPEG, PNG, atau WebP.";
       return;
     }
@@ -150,10 +159,12 @@ photoFile.addEventListener("change", async () => {
     if (request !== requestNumber) return;
     drawPage(photo, photo.naturalWidth, photo.naturalHeight);
     statusMessage.textContent = "Foto berhasil diimpor.";
+    notifyPage("page-ready");
   } catch {
     if (request !== requestNumber) return;
     canvas.hidden = !hasPage;
     emptyPreview.hidden = hasPage;
+    notifyPage("page-resume");
     statusMessage.textContent = "Foto gagal dibaca. Pilih foto lain.";
   } finally {
     if (url) URL.revokeObjectURL(url);
@@ -161,7 +172,12 @@ photoFile.addEventListener("change", async () => {
 });
 
 window.addEventListener("pagehide", () => {
+  notifyPage("page-suspend");
   requestNumber++;
   releaseCamera();
   statusMessage.textContent = hasPage ? "Foto siap di pratinjau." : "Siap mengambil halaman.";
+});
+
+window.addEventListener("pageshow", event => {
+  if (event.persisted) notifyPage("page-resume");
 });
