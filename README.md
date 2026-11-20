@@ -2,7 +2,27 @@
 
 TrueScan uses Python and OpenCV to detect document corners, rectify a page from an original-resolution photo, enhance the rectified page, generate a black-and-white version, and export one or more pages as a PDF.
 
-## Setup and tests
+## Browser capture and photo import
+
+Start the scanner from the repository root with Python 3. The browser app serves static files directly from `web/` and requires no installation or build step.
+
+```sh
+python3 -m http.server 8000 --bind 127.0.0.1 --directory web
+```
+
+Open [the local scanner](http://127.0.0.1:8000/). Choose **Buka kamera** and **Ambil foto**, or **Impor foto** to open a JPEG, PNG, or WebP. Import also works when camera permission is denied. Camera access requires localhost or HTTPS. The browser keeps one page in memory and shows it in its display orientation. Reloading clears the page. Perspective correction and PDF export are currently available through the Python API.
+
+To install and run the browser tests from the repository root with Python 3 on PATH, Node.js 20 or newer, and npm:
+
+```sh
+npm ci
+npx playwright install chromium
+npm test
+```
+
+Chrome 157 with a Pixel 7 emulation profile passed the permission-denial, rotated JPEG import, capture, and camera-release tests using a simulated camera. Mobile Safari 18.6 on an iPhone 16 simulator independently displayed an EXIF-rotated JPEG at the expected dimensions and orientation. Physical camera hardware remains untested. [Mobile screenshot with a synthetic page](docs/screenshots/capture-mobile.png)
+
+## Python setup and tests
 
 Run these commands from the repository root in PowerShell with Python 3.14 and uv installed.
 

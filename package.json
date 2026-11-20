@@ -1,0 +1,10 @@
+{
+  "name": "truescan",
+  "private": true,
+  "scripts": {
+    "test": "playwright test --config tests/browser/playwright.config.cjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.1"
+  }
+}
