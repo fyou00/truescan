@@ -1,6 +1,6 @@
 # TrueScan
 
-TrueScan uses Python and OpenCV to detect document corners, rectify a page from an original-resolution photo, and enhance the rectified page.
+TrueScan uses Python and OpenCV to detect document corners, rectify a page from an original-resolution photo, enhance the rectified page, and generate a black-and-white version.
 
 ## Setup and tests
 
@@ -51,6 +51,19 @@ enhanced = enhancePage(page)
 ```
 
 See the [synthetic before-and-after evaluation](docs/ENHANCEMENT.md) for results and reproduction instructions.
+
+## Black-and-white pages
+
+Pass the enhanced page to `binarizePage` for a single-channel image at the original page dimensions. The default adaptive Gaussian threshold compares each pixel to its neighborhood. Select Otsu to use one threshold across the page. Both modes return black (0) or white (255) pixels.
+
+```python
+from truescan.binarize import binarizePage
+
+black_and_white = binarizePage(enhanced)
+otsu_comparison = binarizePage(enhanced, method="otsu")
+```
+
+See the [binarization evaluation](docs/BINARIZATION.md) for a comparison on synthetic pages.
 
 ## Initial evaluation
 
