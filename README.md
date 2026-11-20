@@ -108,6 +108,10 @@ Path("scan.pdf").write_bytes(exportPdf([enhanced], mode="color"))
 
 The order of the input pages sets the reading order. See the [PDF export verification](docs/PDF_EXPORT.md) for the multi-page checks.
 
+## End-to-end evaluation
+
+The [evaluation report](docs/EVALUATION.md) compares synthetic input photos with pages rendered from the exported PDF. It includes image quality, local OCR accuracy, timing, and the cases that required manual corner selection. The [dataset guide](evaluation/dataset/README.md) describes the scenes and how to regenerate them.
+
 ## Initial evaluation
 
 The tests cover a straight document, a perspective-skewed document in an 1801 × 1133 image, and paper with no visible boundary against a matching background. On the skewed fixture, the maximum corner error was 2.65 pixels. Median local detection time was 6.7 ms over 20 runs after warm-up.
