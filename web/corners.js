@@ -8,6 +8,7 @@
   const apply = document.getElementById("apply-corners");
   const retry = document.getElementById("detect-corners");
   const reset = document.getElementById("reset-corners");
+  const addPage = document.getElementById("add-page");
   const edit = document.getElementById("edit-corners");
   const heading = document.getElementById("corner-heading");
   const names = ["kiri atas", "kanan atas", "kanan bawah", "kiri bawah"];
@@ -48,6 +49,7 @@
     overlay.hidden = panel.hidden || showingResult;
     corrected.hidden = panel.hidden || !showingResult;
     edit.hidden = !showingResult;
+    addPage.hidden = !showingResult;
     for (const control of [apply, retry, reset]) control.hidden = showingResult;
     apply.disabled = points.length !== 4 || Boolean(activeRequest);
     retry.disabled = Boolean(activeRequest);
@@ -217,7 +219,8 @@
     let url;
     try {
       const response = await postImage("/api/warp", request, { "X-Document-Corners": JSON.stringify(points) });
-      url = URL.createObjectURL(await response.blob());
+      const blob = await response.blob();
+      url = URL.createObjectURL(blob);
       const result = new Image();
       result.src = url;
       await result.decode();
@@ -227,7 +230,10 @@
       url = null;
       corrected.src = correctedUrl;
       showingResult = true;
-      message.textContent = "Periksa hasilnya. Pilih Edit sudut untuk menyesuaikan kembali.";
+      document.dispatchEvent(new CustomEvent("page-rectified", {
+        detail: { blob, pixels: result.naturalWidth * result.naturalHeight },
+      }));
+      message.textContent = "Periksa hasilnya, lalu tambahkan halaman ke dokumen.";
     } catch (error) {
       if (!request.signal.aborted) message.textContent = "Halaman gagal diluruskan. " + errorMessage(error);
     } finally {

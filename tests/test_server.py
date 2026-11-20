@@ -3,10 +3,14 @@ import json
 import threading
 import unittest
 from http.server import ThreadingHTTPServer
+from unittest.mock import patch
 
 import cv2
 import numpy as np
+import pypdfium2 as pdfium
 
+from truescan.enhance import enhancePage
+from truescan.pdf import renderPageMode
 from truescan.server import ScannerHandler
 
 
@@ -34,6 +38,9 @@ class ScannerServerTests(unittest.TestCase):
         try:
             connection.request(method, path, body, headers or {})
             response = connection.getresponse()
+            if path == "/api/pdf" and response.status == 200:
+                self.assertEqual(response.getheader("Content-Disposition"),
+                                 'attachment; filename="scan.pdf"')
             return response.status, response.headers.get_content_type(), response.read()
         finally:
             connection.close()
@@ -79,6 +86,64 @@ class ScannerServerTests(unittest.TestCase):
                 status, media_type, body = self.post(path, data, **extra)
                 self.assertEqual((status, media_type), (expected, "application/json"))
                 self.assertIn("error", json.loads(body))
+
+    def test_download_matches_mode_previews_in_request_order(self):
+        horizontal = np.full((100, 150, 3), (235, 210, 195), np.uint8)
+        horizontal[15:20, 10:80] = (20, 45, 110)
+        vertical = np.full((150, 100, 3), (210, 235, 245), np.uint8)
+        vertical[35:110, 20:25] = (80, 35, 10)
+        pages = [vertical, horizontal]
+        encoded = [encode_page(page) for page in pages]
+        body = b"".join(len(page).to_bytes(4, "big") + page for page in encoded)
+        for mode in ("color", "grayscale", "black-and-white"):
+            with self.subTest(mode=mode):
+                headers = {"X-Document-Mode": mode}
+                status, media_type, pdf = self.post("/api/pdf", body, **headers,
+                                                    **{"Content-Type": "application/octet-stream"})
+                self.assertEqual((status, media_type), (200, "application/pdf"))
+                with pdfium.PdfDocument(pdf) as document:
+                    self.assertEqual(len(document), 2)
+                    for index, (page, png) in enumerate(zip(pages, encoded)):
+                        status, media_type, data = self.post("/api/preview", png, **headers)
+                        self.assertEqual((status, media_type), (200, "image/png"))
+                        preview = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_UNCHANGED)
+                        expected = renderPageMode(enhancePage(page), mode)
+                        np.testing.assert_array_equal(preview, expected)
+                        expected_bgr = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+                        pdf_page = document[index]
+                        bitmap = pdf_page.render(scale=300 / 72)
+                        try:
+                            np.testing.assert_array_equal(bitmap.to_numpy()[:, :, :3], expected_bgr)
+                        finally:
+                            bitmap.close()
+                            pdf_page.close()
+
+    def test_large_binary_preview_remains_binary(self):
+        photo = np.full((320, 960), 225, np.uint8)
+        photo[20:25, 20:800] = 20
+        status, _, data = self.post("/api/preview", encode_page(photo),
+                                    **{"X-Document-Mode": "black-and-white"})
+        self.assertEqual(status, 200)
+        result = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_UNCHANGED)
+        self.assertEqual(result.shape, (160, 480))
+        np.testing.assert_array_equal(np.unique(result), [0, 255])
+
+    def test_invalid_pdf_batch(self):
+        png = encode_page(np.zeros((20, 20), np.uint8))
+        frame = len(png).to_bytes(4, "big") + png
+        headers = {"Content-Type": "application/octet-stream", "X-Document-Mode": "color"}
+        for body in (b"", frame + b"x", frame[:-1], b"\x00" * 4):
+            status, media_type, data = self.post("/api/pdf", body, **headers)
+            self.assertEqual((status, media_type), (400, "application/json"))
+            self.assertIn("error", json.loads(data))
+        for setting, limit in (("MAX_DOCUMENT_BYTES", len(frame)), ("MAX_DOCUMENT_PIXELS", 400),
+                               ("MAX_DOCUMENT_PAGES", 1)):
+            with self.subTest(setting=setting), patch("truescan.server." + setting, limit):
+                status, _, _ = self.post("/api/pdf", frame * 2, **headers)
+                self.assertEqual(status, 413)
+        for path in ("/api/preview", "/api/pdf"):
+            status, _, _ = self.post(path, png, **{"X-Document-Mode": "sepia"})
+            self.assertEqual(status, 400)
 
     def test_serve_workspace_assets_only(self):
         status, media_type, body = self.request("GET", "/")

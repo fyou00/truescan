@@ -9,7 +9,13 @@ from fpdf import FPDF
 from .binarize import binarizePage
 
 
-def _page_pixels(page: np.ndarray, mode: str) -> np.ndarray:
+PAGE_MODES = ("color", "grayscale", "black-and-white")
+
+
+def renderPageMode(page: np.ndarray, mode: str) -> np.ndarray:
+    """Convert a page for PDF output or a matching browser preview."""
+    if not isinstance(mode, str) or mode not in PAGE_MODES:
+        raise ValueError("Expected mode 'color', 'grayscale' or 'black-and-white'")
     if not isinstance(page, np.ndarray) or page.dtype != np.uint8:
         raise ValueError("Expected a uint8 image")
     if page.ndim not in (2, 3) or min(page.shape[:2]) < 1:
@@ -32,7 +38,7 @@ def exportPdf(pages: Iterable[np.ndarray], mode: str = "color") -> bytes:
     Each uint8 grayscale, BGR, or BGRA page retains its own pixel dimensions.
     Color conversion ignores alpha, matching the binarization stage.
     """
-    if not isinstance(mode, str) or mode not in ("color", "grayscale", "black-and-white"):
+    if not isinstance(mode, str) or mode not in PAGE_MODES:
         raise ValueError("Expected mode 'color', 'grayscale' or 'black-and-white'")
     if isinstance(pages, np.ndarray):
         raise ValueError("Pass a sequence of pages, such as [image]")
@@ -44,7 +50,7 @@ def exportPdf(pages: Iterable[np.ndarray], mode: str = "color") -> bytes:
     document.set_auto_page_break(False)
     document.set_image_filter("FlateDecode")
     for page in iterator:
-        pixels = _page_pixels(page, mode)
+        pixels = renderPageMode(page, mode)
         height, width = (dimension * 72 / 300 for dimension in pixels.shape[:2])
         document.add_page(format=(width, height))
         # PNG includes dimensions in fpdf2's cache key for differently shaped pages.

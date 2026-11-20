@@ -2,7 +2,7 @@
 
 TrueScan uses Python and OpenCV to detect document corners, rectify a page from an original-resolution photo, enhance the rectified page, generate a black-and-white version, and export one or more pages as a PDF.
 
-## Capture, import, and straighten a page
+## Scan pages and download a PDF
 
 Run these commands from the repository root on macOS or Linux. The local Python server serves the browser app and runs OpenCV in memory. The web assets require no build step.
 
@@ -12,7 +12,7 @@ python3 -m venv .venv
 .venv/bin/python -m truescan.server --port 8000
 ```
 
-Open [the local scanner](http://127.0.0.1:8000/). Choose **Buka kamera** and **Ambil foto**, or **Impor foto** to open a JPEG, PNG, or WebP. Import also works when camera permission is denied. Camera access requires localhost or HTTPS. The browser keeps one page in memory and shows it in its display orientation. Reloading clears the page. The scanner outlines the detected page for review. Drag a corner to adjust it. If detection finds no outline, select the top left, top right, bottom right, and bottom left in order. Confirm the outline to view the straightened page. You can return to the original to adjust it again. PDF export is available through the Python API.
+Open [the local scanner](http://127.0.0.1:8000/). Choose **Buka kamera** and **Ambil foto**, or **Impor foto** to open a JPEG, PNG, or WebP. Import also works when camera permission is denied. Camera access requires localhost or HTTPS. The browser displays the current photo in its display orientation. The scanner outlines the detected page for review. Drag a corner to adjust it. If detection finds no outline, select the top left, top right, bottom right, and bottom left in order. Confirm the outline to view the straightened page. You can return to the original to adjust it again. Choose **Tambah ke dokumen** to include the corrected page. Repeat for the remaining pages. In the document list, move pages into reading order and select color, grayscale, or black-and-white. The thumbnails show the selected export mode. Choose **Unduh PDF** to save the assembled document. Pages stay in memory until you reload or close the tab.
 
 To install and run the browser tests from the repository root after installing the Python dependencies above, with Node.js 20 or newer and npm:
 
@@ -25,6 +25,10 @@ npm test
 Chrome 157 with a Pixel 7 emulation profile passed the permission-denial, rotated JPEG import, capture, and camera-release tests using a simulated camera. Mobile Safari 18.6 on an iPhone 16 simulator independently displayed an EXIF-rotated JPEG at the expected dimensions and orientation. Physical camera hardware remains untested. [Mobile screenshot with a synthetic page](docs/screenshots/capture-mobile.png)
 
 The corner editor was tested with Chromium in Pixel 7 emulation for manual selection, touch dragging, and re-editing. Mobile Safari 18.6 on an iPhone 16 simulator also detected and rectified a synthetic page to 480 × 320 pixels with its orientation marker intact. [Corner editor screenshot](docs/screenshots/corners-mobile.png)
+
+The multi-page download was tested in Chromium with Pixel 7 emulation. Two synthetic pages were reordered and exported in grayscale, then rendered with PDFium and compared to the displayed previews. A second test verifies that retrying a failed preview makes the page available for download. [Document list screenshot](docs/screenshots/document-mobile.png)
+
+A document can contain up to 100 pages, 128 megapixels in total, and 256 MiB of input PNG data including frame headers.
 
 ## Python setup and tests
 
