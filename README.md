@@ -1,6 +1,6 @@
 # TrueScan
 
-TrueScan uses Python and OpenCV to detect document corners, rectify a page from an original-resolution photo, enhance the rectified page, and generate a black-and-white version.
+TrueScan uses Python and OpenCV to detect document corners, rectify a page from an original-resolution photo, enhance the rectified page, generate a black-and-white version, and export one or more pages as a PDF.
 
 ## Setup and tests
 
@@ -8,7 +8,7 @@ Run these commands from the repository root in PowerShell with Python 3.14 and u
 
 ```powershell
 uv venv --python 3.14 .venv
-uv pip install --python .venv\Scripts\python.exe -r requirements.txt
+uv pip install --python .venv\Scripts\python.exe -r requirements-test.txt
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
@@ -64,6 +64,19 @@ otsu_comparison = binarizePage(enhanced, method="otsu")
 ```
 
 See the [binarization evaluation](docs/BINARIZATION.md) for a comparison on synthetic pages.
+
+## PDF export
+
+Pass an ordered sequence of processed pages to `exportPdf`. Each page keeps its pixel dimensions and aspect ratio, with a physical page size calculated at 300 dpi. Select `color` (the default), `grayscale`, or `black-and-white` for the entire document. The function returns PDF bytes, ready to save locally.
+
+```python
+from pathlib import Path
+from truescan.pdf import exportPdf
+
+Path("scan.pdf").write_bytes(exportPdf([enhanced], mode="color"))
+```
+
+The order of the input pages sets the reading order. See the [PDF export verification](docs/PDF_EXPORT.md) for the multi-page checks.
 
 ## Initial evaluation
 
