@@ -100,7 +100,9 @@ h2 { margin: 0; font-weight: 600; font-size: 17px; letter-spacing: -.035em; }
 .page-thumbnail span { color: #526966; font-size: 12px; }
 .page-label { font-size: 15px; font-weight: 600; }
 .document-order { display: flex; align-items: center; gap: 8px; }
-.document-order .button { min-width: 48px; }
+.document-order .button { min-width: 48px; white-space: nowrap; }
+.document-order .remove-page { color: #8f302c; border-color: #cba9a5; }
+.document-order .remove-page:hover { background: #fbeeea; }
 #document-panel button:disabled, #add-page:disabled { cursor: default; opacity: .53; }
 .document-feedback { padding: 10px 22px 16px; border-top: 1px solid #d9e2df; }
 #retry-previews { margin-top: 8px; }
@@ -111,10 +113,14 @@ h2 { margin: 0; font-weight: 600; font-size: 17px; letter-spacing: -.035em; }
     .document-feedback { padding-inline: 15px; }
 }
 
-@media (max-width: 600px) {
+@media (max-width: 640px) {
     #document-pages li { grid-template-columns: 74px minmax(0, 1fr); gap: 10px 14px; padding: 12px 15px; }
     .page-thumbnail, .thumbnail { height: 68px; }
     .document-order { grid-column: 1 / -1; }
     .document-order .button { flex: 1; padding-inline: 8px; }
-    .document-order .rotate-page { flex-grow: 1.4; white-space: nowrap; }
+    .document-order .rotate-page { flex-grow: 1.4; }
+}
+
+@media (max-width: 420px) {
+    .document-order { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

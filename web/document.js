@@ -38,20 +38,48 @@
     status.textContent = "Halaman dipindahkan ke posisi " + (to + 1) + ".";
   }
 
+  function removePage(page) {
+    const index = pages.indexOf(page);
+    if (exporting || preparingPage || index < 0) return;
+    const loading = Boolean(previewRequest);
+    previewRequest?.abort();
+    previewRequest = null;
+    pages.splice(index, 1);
+    invalidate(page);
+    page.row.remove();
+    const missingPreviews = pages.some(item => !item.url);
+    if (!missingPreviews) retry.hidden = true;
+    render();
+    if (loading && missingPreviews) refresh();
+    if (pages.length) {
+      status.textContent = "Halaman " + (index + 1) + " dihapus. Tersisa " + pages.length + " halaman.";
+      pages[Math.min(index, pages.length - 1)].remove.focus({ preventScroll: true });
+    } else {
+      const camera = document.getElementById("open-camera");
+      const target = add.getClientRects().length && !add.disabled ? add :
+        (camera.hidden ? document.getElementById("stop-camera") : camera);
+      document.getElementById("status").textContent = "Halaman terakhir dihapus. Dokumen kosong.";
+      target.focus();
+    }
+  }
+
   function newPage(id) {
     const row = document.createElement("li");
     row.innerHTML = '<div class="page-thumbnail"><span>Memuat…</span><img class="thumbnail" hidden></div>' +
       '<span class="page-label"></span><div class="document-order">' +
       '<button class="button rotate-page" type="button">Putar 90°</button>' +
       '<button class="button move-up" type="button">Naik</button>' +
-      '<button class="button move-down" type="button">Turun</button></div>';
+      '<button class="button move-down" type="button">Turun</button>' +
+      '<button class="button remove-page" type="button">Hapus</button></div>';
     const page = {
       id, row, url: "", image: row.querySelector("img"), pending: row.querySelector(".page-thumbnail span"),
       rotate: row.querySelector(".rotate-page"),
+      remove: row.querySelector(".remove-page"),
       label: row.querySelector(".page-label"), up: row.querySelector(".move-up"), down: row.querySelector(".move-down"),
     };
     page.up.addEventListener("click", () => move(page, -1));
     page.down.addEventListener("click", () => move(page, 1));
+    page.remove.addEventListener("click", () => removePage(page));
     page.rotate.addEventListener("click", () => {
       if (!page.rotate.disabled) savePage(page, page.original, (page.turns + 1) % 4);
     });
@@ -76,6 +104,8 @@
       page.image.alt = "Pratinjau halaman " + number;
       page.rotate.setAttribute("aria-label", "Putar halaman " + number + " 90° ke kanan");
       page.rotate.disabled = busy || Boolean(previewRequest);
+      page.remove.setAttribute("aria-label", "Hapus halaman " + number);
+      page.remove.disabled = busy;
       page.up.setAttribute("aria-label", "Naikkan halaman " + number);
       page.down.setAttribute("aria-label", "Turunkan halaman " + number);
       page.up.disabled = busy || index === 0;

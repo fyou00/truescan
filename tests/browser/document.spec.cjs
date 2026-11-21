@@ -3,8 +3,8 @@ const { existsSync, writeFileSync } = require("node:fs");
 const path = require("node:path");
 const { test, expect } = require("@playwright/test");
 
-async function addSheet(page, portrait, total) {
-    const data = await page.evaluate(vertical => {
+async function addSheet(page, portrait, total, markerColor = portrait ? "#c75037" : "#244ca0") {
+    const data = await page.evaluate(({ vertical, markerColor }) => {
         const photo = document.createElement("canvas");
         const w = vertical ? 320 : 520;
         const h = vertical ? 460 : 300;
@@ -24,12 +24,12 @@ async function addSheet(page, portrait, total) {
         ctx.fillRect(20, 82, w - 40, 2);
         ctx.font = "16px sans-serif";
         ctx.fillText("Sampel cetak", 20, 113);
-        ctx.fillStyle = vertical ? "#c75037" : "#244ca0";
+        ctx.fillStyle = markerColor;
         const x = w * (vertical ? 0.25 : 0.75);
         const y = h * (vertical ? 0.4 : 0.7);
         ctx.fillRect(x - 18, y - 14, 36, 28);
         return photo.toDataURL("image/png").split(",")[1];
-    }, portrait);
+    }, { vertical: portrait, markerColor });
     const detected = page.waitForResponse(response => response.url().endsWith("/api/corners"));
     await page.locator("#photo-file").setInputFiles({
         name: portrait ? "calibration.png" : "color.png", mimeType: "image/png",
@@ -166,4 +166,44 @@ test("rotate only the second marked page in the preview and downloaded PDF", asy
         }
         if (turns === 4) expect(second.png === originalSecond.png).toBe(true);
     }
+});
+
+test("remove the middle sheet, export the remaining pages and reuse the empty document", async ({ page }, testInfo) => {
+    test.setTimeout(60_000);
+    await page.goto("/");
+    const firstSize = await addSheet(page, true, 1);
+    await addSheet(page, false, 2);
+    const thirdSize = await addSheet(page, true, 3, "#22824c");
+    const rows = page.locator("#document-pages > li");
+    const download = page.locator("#download-pdf");
+    await expect(download).toBeEnabled();
+    const first = await readPreview(rows.first().locator("img"), true);
+    const middle = await readPreview(rows.nth(1).locator("img"), false);
+    const third = await readPreview(rows.last().locator("img"), true);
+    expect(first.marker[0] - first.marker[1]).toBeGreaterThan(45);
+    expect(middle.marker[2] - middle.marker[0]).toBeGreaterThan(45);
+    expect(third.marker[1] - third.marker[0]).toBeGreaterThan(45);
+
+    await rows.nth(1).locator(".remove-page").click();
+    await expect(rows).toHaveCount(2);
+    await expect(rows.locator(".page-label")).toHaveText(["Halaman 1", "Halaman 2"]);
+    const remainingFirst = await readPreview(rows.first().locator("img"), true);
+    const remainingSecond = await readPreview(rows.last().locator("img"), true);
+    expect(remainingFirst.png === first.png).toBe(true);
+    expect(remainingSecond.png === third.png).toBe(true);
+    if (process.env.TRUESCAN_REMOVAL_SCREENSHOT) {
+        await page.locator("#document-panel").scrollIntoViewIfNeeded();
+        await page.screenshot({ path: process.env.TRUESCAN_REMOVAL_SCREENSHOT });
+    }
+    await downloadAndCompare(page, testInfo, [first, third], "color", [firstSize, thirdSize]);
+
+    await rows.first().locator(".remove-page").click();
+    await rows.first().locator(".remove-page").click();
+    await expect(rows).toHaveCount(0);
+    await expect(download).toBeDisabled();
+    await page.locator("#add-page").click();
+    await expect(rows).toHaveCount(1);
+    await expect(download).toBeEnabled();
+    const restored = await readPreview(rows.first().locator("img"), true);
+    expect(restored.png === third.png).toBe(true);
 });
