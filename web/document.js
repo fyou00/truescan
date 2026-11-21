@@ -12,6 +12,7 @@
   let candidate = null;
   let previewRequest = null;
   let exporting = false;
+  let preparingPage = false;
   let downloadUrl = "";
 
   document.addEventListener("page-ready", () => {
@@ -27,7 +28,7 @@
   function move(page, direction) {
     const from = pages.indexOf(page);
     const to = from + direction;
-    if (exporting || to < 0 || to >= pages.length) return;
+    if (exporting || preparingPage || to < 0 || to >= pages.length) return;
     pages.splice(from, 1);
     pages.splice(to, 0, page);
     render();
@@ -37,39 +38,48 @@
     status.textContent = "Halaman dipindahkan ke posisi " + (to + 1) + ".";
   }
 
-  function newPage(id, source) {
+  function newPage(id) {
     const row = document.createElement("li");
     row.innerHTML = '<div class="page-thumbnail"><span>Memuat…</span><img class="thumbnail" hidden></div>' +
       '<span class="page-label"></span><div class="document-order">' +
+      '<button class="button rotate-page" type="button">Putar 90°</button>' +
       '<button class="button move-up" type="button">Naik</button>' +
       '<button class="button move-down" type="button">Turun</button></div>';
     const page = {
-      id, ...source, row, url: "", image: row.querySelector("img"), pending: row.querySelector(".page-thumbnail span"),
+      id, row, url: "", image: row.querySelector("img"), pending: row.querySelector(".page-thumbnail span"),
+      rotate: row.querySelector(".rotate-page"),
       label: row.querySelector(".page-label"), up: row.querySelector(".move-up"), down: row.querySelector(".move-down"),
     };
     page.up.addEventListener("click", () => move(page, -1));
     page.down.addEventListener("click", () => move(page, 1));
+    page.rotate.addEventListener("click", () => {
+      if (!page.rotate.disabled) savePage(page, page.original, (page.turns + 1) % 4);
+    });
     return page;
   }
 
   function render() {
     const previous = pages.find(page => page.id === sourceId);
-    const alreadyAdded = Boolean(previous && previous.blob === candidate?.blob);
-    add.disabled = exporting || !candidate || alreadyAdded;
+    const busy = exporting || preparingPage;
+    const alreadyAdded = Boolean(previous && previous.original === candidate);
+    add.disabled = busy || !candidate || alreadyAdded;
     add.textContent = alreadyAdded ? "Sudah ditambahkan" : "Tambah ke dokumen";
     if (previous && !alreadyAdded) add.textContent = "Perbarui halaman";
     panel.hidden = !pages.length;
     count.textContent = pages.length + " halaman";
-    mode.disabled = exporting;
-    download.disabled = exporting || Boolean(previewRequest) || !pages.length || pages.some(page => !page.url);
+    retry.disabled = busy;
+    mode.disabled = busy;
+    download.disabled = busy || Boolean(previewRequest) || !pages.length || pages.some(page => !page.url);
     pages.forEach((page, index) => {
       const number = index + 1;
       page.label.textContent = "Halaman " + number;
       page.image.alt = "Pratinjau halaman " + number;
+      page.rotate.setAttribute("aria-label", "Putar halaman " + number + " 90° ke kanan");
+      page.rotate.disabled = busy || Boolean(previewRequest);
       page.up.setAttribute("aria-label", "Naikkan halaman " + number);
       page.down.setAttribute("aria-label", "Turunkan halaman " + number);
-      page.up.disabled = exporting || index === 0;
-      page.down.disabled = exporting || index === pages.length - 1;
+      page.up.disabled = busy || index === 0;
+      page.down.disabled = busy || index === pages.length - 1;
       if (list.children[index] !== page.row) list.insertBefore(page.row, list.children[index] || null);
     });
   }
@@ -143,26 +153,63 @@
     }
   }
 
+  async function rotatedPng(original, turns) {
+    if (!turns) return original;
+    const bitmap = await createImageBitmap(original);
+    const canvas = document.createElement("canvas");
+    try {
+      const { width, height } = bitmap;
+      canvas.width = turns % 2 ? height : width;
+      canvas.height = turns % 2 ? width : height;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Gagal membuat gambar halaman.");
+      if (turns === 1) context.setTransform(0, 1, -1, 0, height, 0);
+      if (turns === 2) context.setTransform(-1, 0, 0, -1, width, height);
+      if (turns === 3) context.setTransform(0, -1, 1, 0, 0, width);
+      context.imageSmoothingEnabled = false;
+      context.drawImage(bitmap, 0, 0);
+      const result = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+      if (!result) throw new Error("Gagal menyimpan rotasi halaman.");
+      return result;
+    } finally {
+      bitmap.close();
+      canvas.width = canvas.height = 0;
+    }
+  }
+
+  async function savePage(previous, original, turns) {
+    const id = previous?.id ?? sourceId;
+    const rotating = previous?.original === original;
+    preparingPage = true;
+    render();
+    try {
+      const blob = await rotatedPng(original.blob, turns);
+      const others = pages.filter(page => page !== previous);
+      const pixels = others.reduce((sum, page) => sum + page.original.pixels, original.pixels);
+      const bytes = others.reduce((sum, page) => sum + 4 + page.blob.size, 4 + blob.size);
+      if (blob.size > 128 * 1024 * 1024) throw new Error("Ukuran halaman melebihi 128 MiB.");
+      if (others.length >= 100 || pixels > 128_000_000 || bytes > 256 * 1024 * 1024) {
+        throw new Error("Dokumen mencapai batas 100 halaman, 128 megapiksel total, atau 256 MiB. Unduh halaman yang sudah ditambahkan.");
+      }
+      const page = previous || newPage(id);
+      if (previous) invalidate(page);
+      else pages.push(page);
+      Object.assign(page, { blob, original, turns });
+      refresh();
+      if (!rotating) panel.scrollIntoView({ block: "nearest" });
+    } catch (error) {
+      const message = rotating ? status : document.getElementById("corner-message");
+      message.textContent = "Halaman gagal diperbarui. " + error.message;
+    } finally {
+      preparingPage = false;
+      render();
+    }
+  }
+
   add.addEventListener("click", () => {
     if (add.disabled || !candidate) return;
     const previous = pages.find(page => page.id === sourceId);
-    const others = pages.filter(page => page !== previous);
-    const pixels = others.reduce((sum, page) => sum + page.pixels, candidate.pixels);
-    const bytes = others.reduce((sum, page) => sum + 4 + page.blob.size, 4 + candidate.blob.size);
-    if (others.length + 1 > 100 || pixels > 128_000_000 || bytes > 256 * 1024 * 1024) {
-      document.getElementById("corner-message").textContent =
-        "Dokumen mencapai batas 100 halaman, 128 megapiksel total, atau 256 MiB. Unduh halaman yang sudah ditambahkan.";
-      return;
-    }
-    if (previous) {
-      invalidate(previous);
-      previous.blob = candidate.blob;
-      previous.pixels = candidate.pixels;
-    } else {
-      pages.push(newPage(sourceId, candidate));
-    }
-    refresh();
-    panel.scrollIntoView({ block: "nearest" });
+    savePage(previous, candidate, previous?.turns || 0);
   });
   mode.addEventListener("change", () => {
     pages.forEach(invalidate);

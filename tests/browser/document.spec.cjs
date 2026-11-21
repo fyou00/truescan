@@ -39,26 +39,48 @@ async function addSheet(page, portrait, total) {
     await expect(page.locator("#corner-message")).toContainText("Empat sudut ditemukan");
     await page.locator("#apply-corners").click();
     await expect(page.locator("#corrected-preview")).toBeVisible();
+    const size = await page.locator("#corrected-preview").evaluate(img => [img.naturalWidth, img.naturalHeight]);
     await page.locator("#add-page").click();
     await expect(page.locator("#document-pages > li")).toHaveCount(total);
+    return size;
 }
 
-async function readPreview(image, portrait) {
-    return image.evaluate(async (img, vertical) => {
+async function readPreview(image, portrait, clockwiseTurns = 0) {
+    return image.evaluate(async (img, { vertical, turns }) => {
         await img.decode();
         const bitmap = document.createElement("canvas");
         bitmap.width = img.naturalWidth;
         bitmap.height = img.naturalHeight;
         const ctx = bitmap.getContext("2d");
         ctx.drawImage(img, 0, 0);
-        const x = bitmap.width * (vertical ? 0.25 : 0.75);
-        const y = bitmap.height * (vertical ? 0.4 : 0.7);
+        let [x, y] = vertical ? [0.25, 0.4] : [0.75, 0.7];
+        for (let i = 0; i < turns; i++) [x, y] = [1 - y, x];
         return {
             portrait: bitmap.height > bitmap.width,
-            marker: [...ctx.getImageData(x, y, 1, 1).data].slice(0, 3),
+            marker: [...ctx.getImageData(x * bitmap.width, y * bitmap.height, 1, 1).data].slice(0, 3),
             png: bitmap.toDataURL("image/png").split(",")[1],
         };
-    }, portrait);
+    }, { vertical: portrait, turns: clockwiseTurns });
+}
+
+async function downloadAndCompare(page, testInfo, previews, mode, dimensions = []) {
+    const previewPaths = previews.map(({ png }, i) => {
+        const file = testInfo.outputPath(`preview-${i + 1}.png`);
+        writeFileSync(file, Buffer.from(png, "base64"));
+        return file;
+    });
+    const pending = page.waitForEvent("download");
+    await page.locator("#download-pdf").click();
+    const download = await pending;
+    const pdf = testInfo.outputPath("document.pdf");
+    await download.saveAs(pdf);
+    expect(download.suggestedFilename()).toMatch(/\.pdf$/i);
+
+    const windows = process.platform === "win32";
+    const python = path.resolve(__dirname, "../..", ".venv", windows ? "Scripts/python.exe" : "bin/python");
+    execFileSync(existsSync(python) ? python : (windows ? "python" : "python3"), [
+        path.join(__dirname, "verify_document.py"), pdf, mode, JSON.stringify(dimensions), ...previewPaths,
+    ]);
 }
 
 test("reorder two corrected pages and download a PDF matching the grayscale previews", async ({ page }, testInfo) => {
@@ -91,23 +113,7 @@ test("reorder two corrected pages and download a PDF matching the grayscale prev
     }).toBe(true);
     expect(landscape.portrait).toBe(false);
     expect(portrait.portrait).toBe(true);
-    const previewPaths = [landscape, portrait].map(({ png }, i) => {
-        const file = testInfo.outputPath(`preview-${i + 1}.png`);
-        writeFileSync(file, Buffer.from(png, "base64"));
-        return file;
-    });
-    const pending = page.waitForEvent("download");
-    await page.locator("#download-pdf").click();
-    const download = await pending;
-    const pdf = testInfo.outputPath("document.pdf");
-    await download.saveAs(pdf);
-    expect(download.suggestedFilename()).toMatch(/\.pdf$/i);
-
-    const windows = process.platform === "win32";
-    const python = path.resolve(__dirname, "../..", ".venv", windows ? "Scripts/python.exe" : "bin/python");
-    execFileSync(existsSync(python) ? python : (windows ? "python" : "python3"), [
-        path.join(__dirname, "verify_document.py"), pdf, ...previewPaths,
-    ]);
+    await downloadAndCompare(page, testInfo, [landscape, portrait], "grayscale");
 });
 
 test("retry a failed preview without losing the added page", async ({ page }) => {
@@ -127,4 +133,37 @@ test("retry a failed preview without losing the added page", async ({ page }) =>
     const preview = await readPreview(page.locator("#document-pages img"), true);
     expect(preview.portrait).toBe(true);
     expect(preview.marker[0] - preview.marker[2]).toBeGreaterThan(45);
+});
+
+test("rotate only the second marked page in the preview and downloaded PDF", async ({ page }, testInfo) => {
+    test.setTimeout(60_000);
+    await page.goto("/");
+    const firstSize = await addSheet(page, true, 1);
+    const [secondWidth, secondHeight] = await addSheet(page, false, 2);
+    const ready = page.locator("#download-pdf");
+    await expect(ready).toBeEnabled();
+    const images = page.locator("#document-pages > li img");
+    const originalFirst = await readPreview(images.first(), true);
+    const originalSecond = await readPreview(images.last(), false);
+    for (let turns = 1; turns <= 4; turns++) {
+        await page.locator("#document-pages > li").last().locator(".rotate-page").click();
+        await expect(ready).toBeEnabled();
+        const first = await readPreview(images.first(), true);
+        const second = await readPreview(images.last(), false, turns);
+        expect(first.png === originalFirst.png).toBe(true);
+        expect(second.portrait).toBe(turns % 2 === 1);
+        // Enhancement and thumbnail resampling run again in the new orientation.
+        for (const [channel, value] of second.marker.entries()) {
+            expect(Math.abs(value - originalSecond.marker[channel])).toBeLessThanOrEqual(3);
+        }
+        if (turns === 1) {
+            if (process.env.TRUESCAN_ROTATION_SCREENSHOT) {
+                await page.locator("#document-panel").scrollIntoViewIfNeeded();
+                await page.screenshot({ path: process.env.TRUESCAN_ROTATION_SCREENSHOT });
+            }
+            await downloadAndCompare(page, testInfo, [first, second], "color",
+                                     [firstSize, [secondHeight, secondWidth]]);
+        }
+        if (turns === 4) expect(second.png === originalSecond.png).toBe(true);
+    }
 });
