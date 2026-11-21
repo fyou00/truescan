@@ -94,12 +94,18 @@
                     <p id="page-count"></p>
                 </div>
                 <div class="export-tools">
-                    <label for="document-mode">Mode halaman</label>
-                    <select id="document-mode">
-                        <option value="color">Warna</option>
-                        <option value="grayscale">Abu-abu</option>
-                        <option value="black-and-white">Hitam-putih</option>
-                    </select>
+                    <div class="export-field">
+                        <label for="document-name">Nama berkas (opsional)</label>
+                        <input id="document-name" type="text" placeholder="TrueScan.pdf" autocomplete="off" spellcheck="false">
+                    </div>
+                    <div class="export-field">
+                        <label for="document-mode">Mode halaman</label>
+                        <select id="document-mode">
+                            <option value="color">Warna</option>
+                            <option value="grayscale">Abu-abu</option>
+                            <option value="black-and-white">Hitam-putih</option>
+                        </select>
+                    </div>
                     <button type="button" class="button primary" id="download-pdf" disabled>Unduh PDF</button>
                 </div>
             </div>

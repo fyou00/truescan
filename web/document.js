@@ -4,6 +4,7 @@
   const list = document.getElementById("document-pages");
   const count = document.getElementById("page-count");
   const mode = document.getElementById("document-mode");
+  const documentName = document.getElementById("document-name");
   const download = document.getElementById("download-pdf");
   const retry = document.getElementById("retry-previews");
   const status = document.getElementById("document-status");
@@ -97,6 +98,7 @@
     count.textContent = pages.length + " halaman";
     retry.disabled = busy;
     mode.disabled = busy;
+    documentName.disabled = exporting;
     download.disabled = busy || Boolean(previewRequest) || !pages.length || pages.some(page => !page.url);
     pages.forEach((page, index) => {
       const number = index + 1;
@@ -254,8 +256,18 @@
     if (downloadUrl) URL.revokeObjectURL(downloadUrl);
   });
 
+  function pdfFilename(value) {
+    let stem = value.trim().replace(/[<>:"/\\|?*\u0000-\u001f\u007f]+/g, "-")
+      .replace(/[.\s]+$/, "").replace(/(?:\.pdf\s*)+$/i, "")
+      .replace(/^[.\s]+|[.\s]+$/g, "");
+    if (!stem || /^-+$/.test(stem)) stem = "TrueScan";
+    if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(stem)) stem = "_" + stem;
+    return stem + ".pdf";
+  }
+
   download.addEventListener("click", async () => {
     if (download.disabled) return;
+    const filename = pdfFilename(documentName.value);
     exporting = true;
     render();
     status.textContent = "Menyusun PDF…";
@@ -275,11 +287,11 @@
       downloadUrl = URL.createObjectURL(pdf);
       const link = document.createElement("a");
       link.href = downloadUrl;
-      link.download = "TrueScan.pdf";
+      link.download = filename;
       document.body.append(link);
       link.click();
       link.remove();
-      status.textContent = "Unduhan TrueScan.pdf dimulai.";
+      status.textContent = "Unduhan " + filename + " dimulai.";
     } catch (error) {
       status.textContent = "Unduhan gagal. " + errorText(error);
     } finally {

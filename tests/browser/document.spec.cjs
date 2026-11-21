@@ -81,6 +81,7 @@ async function downloadAndCompare(page, testInfo, previews, mode, dimensions = [
     execFileSync(existsSync(python) ? python : (windows ? "python" : "python3"), [
         path.join(__dirname, "verify_document.py"), pdf, mode, JSON.stringify(dimensions), ...previewPaths,
     ]);
+    return download.suggestedFilename();
 }
 
 test("reorder two corrected pages and download a PDF matching the grayscale previews", async ({ page }, testInfo) => {
@@ -206,4 +207,32 @@ test("remove the middle sheet, export the remaining pages and reuse the empty do
     await expect(download).toBeEnabled();
     const restored = await readPreview(rows.first().locator("img"), true);
     expect(restored.png === third.png).toBe(true);
+});
+
+test("download named PDFs and keep the corrected pages ready for the next export", async ({ page }, testInfo) => {
+    test.setTimeout(60_000);
+    await page.goto("/");
+    const portraitSize = await addSheet(page, true, 1);
+    const landscapeSize = await addSheet(page, false, 2);
+    const name = page.getByLabel("Nama berkas (opsional)");
+    const download = page.locator("#download-pdf");
+    const images = page.locator("#document-pages > li img");
+    await expect(download).toBeEnabled();
+    const previews = [await readPreview(images.first(), true), await readPreview(images.last(), false)];
+    for (const [entered, expected] of [
+        ["  Hasil pemindaian  ", "Hasil pemindaian.pdf"],
+        ["Lembar contoh.pdf", "Lembar contoh.pdf"],
+        ["Kalibrasi.PDF", "Kalibrasi.pdf"],
+        ["", "TrueScan.pdf"],
+    ]) {
+        await name.fill(entered);
+        const actual = await downloadAndCompare(page, testInfo, previews, "color", [portraitSize, landscapeSize]);
+        expect(actual).toBe(expected);
+        await expect(download).toBeEnabled();
+        await expect(images).toHaveCount(2);
+        if (entered === "Lembar contoh.pdf" && process.env.TRUESCAN_FILENAME_SCREENSHOT) {
+            await page.locator("#document-panel").scrollIntoViewIfNeeded();
+            await page.screenshot({ path: process.env.TRUESCAN_FILENAME_SCREENSHOT });
+        }
+    }
 });
