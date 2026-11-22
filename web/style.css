@@ -63,6 +63,7 @@ h2 { margin: 0; font-weight: 600; font-size: 17px; letter-spacing: -.035em; }
     .tools { padding: 15px; }
     .actions { width: 100%; }
     .actions .button { flex: 1 1 40%; padding: 10px 6px; }
+    .camera-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .status-bar { padding: 11px 15px; }
 }
 @media (prefers-reduced-motion: no-preference) {

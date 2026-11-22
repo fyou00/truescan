@@ -1,5 +1,6 @@
 const openCamera = document.getElementById("open-camera");
 const takePhoto = document.getElementById("take-photo");
+const switchCamera = document.getElementById("switch-camera");
 const stopCamera = document.getElementById("stop-camera");
 const photoFile = document.getElementById("photo-file");
 const video = document.getElementById("camera-preview");
@@ -8,6 +9,8 @@ const emptyPreview = document.getElementById("empty-preview");
 const statusMessage = document.getElementById("status");
 
 let stream = null;
+let cameras = [];
+let selectedDeviceId = "";
 let requestNumber = 0;
 let hasPage = false;
 
@@ -26,6 +29,9 @@ function releaseCamera() {
   video.hidden = true;
   takePhoto.hidden = true;
   takePhoto.disabled = true;
+  switchCamera.hidden = true;
+  cameras = [];
+  selectedDeviceId = "";
   stopCamera.hidden = true;
   openCamera.hidden = false;
   canvas.hidden = !hasPage;
@@ -61,7 +67,19 @@ function drawPage(source, width, height) {
   emptyPreview.hidden = true;
 }
 
-openCamera.addEventListener("click", async () => {
+async function updateCameraChoices(request) {
+  let devices = [];
+  try {
+    devices = await navigator.mediaDevices.enumerateDevices();
+  } catch {
+    // A browser may permit capture but withhold the list of available cameras.
+  }
+  if (request !== requestNumber || !stream) return;
+  cameras = devices.filter(device => device.kind === "videoinput" && device.deviceId);
+  switchCamera.hidden = cameras.length < 2;
+}
+
+async function startCamera(constraints, alternateDeviceId) {
   const request = ++requestNumber;
   releaseCamera();
   if (!navigator.mediaDevices?.getUserMedia) {
@@ -72,18 +90,28 @@ openCamera.addEventListener("click", async () => {
   notifyPage("page-suspend");
   openCamera.hidden = true;
   stopCamera.hidden = false;
-  statusMessage.textContent = "Menunggu izin kamera…";
+  statusMessage.textContent = alternateDeviceId ? "Mengganti kamera…" : "Menunggu izin kamera…";
   stopCamera.focus();
   try {
-    const acquired = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: "environment" } },
-      audio: false,
-    });
+    let acquired;
+    let requestedId = constraints.deviceId?.exact;
+    try {
+      acquired = await navigator.mediaDevices.getUserMedia({ video: constraints, audio: false });
+    } catch (error) {
+      // Devices with multiple rear lenses can lack support for an exact facing mode.
+      if (request !== requestNumber || !constraints.facingMode?.exact || !alternateDeviceId ||
+          !["NotFoundError", "OverconstrainedError"].includes(error.name)) throw error;
+      acquired = await navigator.mediaDevices.getUserMedia({
+        video: { deviceId: { exact: alternateDeviceId } }, audio: false,
+      });
+      requestedId = alternateDeviceId;
+    }
     if (request !== requestNumber) {
       stopTracks(acquired);
       return;
     }
     stream = acquired;
+    selectedDeviceId = requestedId || "";
     for (const track of stream.getVideoTracks()) {
       track.addEventListener("ended", () => {
         if (request === requestNumber) {
@@ -102,6 +130,7 @@ openCamera.addEventListener("click", async () => {
     takePhoto.hidden = false;
     takePhoto.disabled = false;
     statusMessage.textContent = "Kamera aktif. Posisikan dokumen, lalu ambil foto.";
+    await updateCameraChoices(request);
   } catch (error) {
     if (request !== requestNumber) return;
     const denied = error.name === "NotAllowedError" || error.name === "SecurityError";
@@ -109,6 +138,30 @@ openCamera.addEventListener("click", async () => {
       ? "Izin kamera ditolak. Pilih Impor foto untuk melanjutkan."
       : "Kamera gagal dibuka. Pilih Impor foto untuk melanjutkan.");
   }
+}
+
+openCamera.addEventListener("click", () => startCamera({ facingMode: { ideal: "environment" } }));
+
+switchCamera.addEventListener("click", () => {
+  if (!stream || cameras.length < 2) return;
+  const track = stream.getVideoTracks()[0];
+  const settings = track.getSettings();
+  const currentId = settings.deviceId || selectedDeviceId;
+  const current = cameras.findIndex(device =>
+    device.deviceId === currentId || (!currentId && track.label && device.label === track.label)
+  );
+  const next = cameras[(current + 1) % cameras.length].deviceId;
+  const hasFacing = settings.facingMode === "environment" || settings.facingMode === "user";
+  if ((cameras.length > 2 || current < 0) && hasFacing) {
+    const facing = settings.facingMode === "environment" ? "user" : "environment";
+    startCamera({ facingMode: { exact: facing } }, next);
+  } else {
+    startCamera({ deviceId: { exact: next } }, next);
+  }
+});
+
+navigator.mediaDevices?.addEventListener?.("devicechange", () => {
+  if (stream && !takePhoto.hidden) updateCameraChoices(requestNumber);
 });
 
 takePhoto.addEventListener("click", () => {
