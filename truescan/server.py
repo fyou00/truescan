@@ -104,6 +104,62 @@ def previewPage(image, mode):
     return cv2.resize(pixels, size, interpolation=interpolation)
 
 
+def _content_type(headers):
+    if hasattr(headers, "get_content_type"):
+        return headers.get_content_type()
+    return headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+
+
+def _json_reply(status, value):
+    return status, "application/json; charset=utf-8", json.dumps(value).encode()
+
+
+def handleApiPost(path, headers, body_stream):
+    """Handle TrueScan API POST requests and return (status, media_type, body)."""
+    if path not in ("/api/corners", "/api/warp", "/api/preview", "/api/pdf"):
+        return _json_reply(404, {"error": "Alamat tidak ditemukan."})
+    try:
+        length = headers.get("Content-Length", "")
+        if not length.isascii() or not length.isdigit() or len(length) > 12:
+            raise RequestError(400, "Ukuran data gambar tidak valid.")
+        length = int(length)
+        if path in ("/api/pdf", "/api/preview"):
+            mode = headers.get("X-Document-Mode")
+            if mode not in PAGE_MODES:
+                raise RequestError(400, "Mode warna dokumen tidak valid.")
+        content_type = _content_type(headers)
+        if path == "/api/pdf":
+            if content_type != "application/octet-stream":
+                raise RequestError(415, "Kirim urutan halaman dalam format biner.")
+            if length > MAX_DOCUMENT_BYTES:
+                raise RequestError(413, "Berkas dokumen terlalu besar.")
+            page_size = headers.get("X-Document-Page-Size", "original")
+            if page_size not in PAGE_SIZES:
+                raise RequestError(400, "Ukuran halaman PDF tidak valid.")
+            pdf = exportPdf(readDocumentPages(body_stream, length), mode, page_size=page_size)
+            return 200, "application/pdf", pdf
+        if content_type != "image/png":
+            raise RequestError(415, "Kirim foto dalam format PNG.")
+        if length > MAX_PNG_BYTES:
+            raise RequestError(413, "Berkas foto terlalu besar.")
+        image = readPage(body_stream.read(length))
+        if path == "/api/corners":
+            points = detectCorners(image)
+            return _json_reply(200, {"corners": None if points is None else points.tolist()})
+        if path == "/api/preview":
+            page = previewPage(image, mode)
+        else:
+            page = warpPage(image, headers.get("X-Document-Corners"))
+        success, encoded = cv2.imencode(".png", page)
+        if not success:
+            raise RequestError(500, "Gagal membuat gambar halaman.")
+        return 200, "image/png", encoded.tobytes()
+    except RequestError as error:
+        return _json_reply(error.status, {"error": str(error)})
+    except cv2.error:
+        return _json_reply(400, {"error": "Gambar gagal diproses."})
+
+
 class ScannerHandler(BaseHTTPRequestHandler):
     def _reply(self, status, media_type, data):
         self.send_response(status)
@@ -154,50 +210,8 @@ class ScannerHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._local_request():
             return
-        if self.path not in ("/api/corners", "/api/warp", "/api/preview", "/api/pdf"):
-            self._json(404, {"error": "Alamat tidak ditemukan."})
-            return
-        try:
-            length = self.headers.get("Content-Length", "")
-            if not length.isascii() or not length.isdigit() or len(length) > 12:
-                raise RequestError(400, "Ukuran data gambar tidak valid.")
-            length = int(length)
-            if self.path in ("/api/pdf", "/api/preview"):
-                mode = self.headers.get("X-Document-Mode")
-                if mode not in PAGE_MODES:
-                    raise RequestError(400, "Mode warna dokumen tidak valid.")
-            if self.path == "/api/pdf":
-                if self.headers.get_content_type() != "application/octet-stream":
-                    raise RequestError(415, "Kirim urutan halaman dalam format biner.")
-                if length > MAX_DOCUMENT_BYTES:
-                    raise RequestError(413, "Berkas dokumen terlalu besar.")
-                page_size = self.headers.get("X-Document-Page-Size", "original")
-                if page_size not in PAGE_SIZES:
-                    raise RequestError(400, "Ukuran halaman PDF tidak valid.")
-                pdf = exportPdf(readDocumentPages(self.rfile, length), mode, page_size=page_size)
-                self._reply(200, "application/pdf", pdf)
-                return
-            if self.headers.get_content_type() != "image/png":
-                raise RequestError(415, "Kirim foto dalam format PNG.")
-            if length > MAX_PNG_BYTES:
-                raise RequestError(413, "Berkas foto terlalu besar.")
-            image = readPage(self.rfile.read(length))
-            if self.path == "/api/corners":
-                points = detectCorners(image)
-                self._json(200, {"corners": None if points is None else points.tolist()})
-            else:
-                if self.path == "/api/preview":
-                    page = previewPage(image, mode)
-                else:
-                    page = warpPage(image, self.headers.get("X-Document-Corners"))
-                success, encoded = cv2.imencode(".png", page)
-                if not success:
-                    raise RequestError(500, "Gagal membuat gambar halaman.")
-                self._reply(200, "image/png", encoded.tobytes())
-        except RequestError as error:
-            self._json(error.status, {"error": str(error)})
-        except cv2.error:
-            self._json(400, {"error": "Gambar gagal diproses."})
+        status, media_type, data = handleApiPost(self.path, self.headers, self.rfile)
+        self._reply(status, media_type, data)
 
 
 def main():

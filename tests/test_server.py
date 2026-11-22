@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 import pypdfium2 as pdfium
 
+from api.index import handler as vercel_handler
 from truescan.enhance import enhancePage
 from truescan.pdf import renderPageMode
 from truescan.server import ScannerHandler
@@ -166,3 +167,122 @@ class ScannerServerTests(unittest.TestCase):
         self.assertIn(b"TrueScan", body)
         status, _, _ = self.request("GET", "/%2e%2e/README.md")
         self.assertEqual(status, 404)
+
+
+class VercelHandlerTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), vercel_handler)
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.thread.join()
+        cls.server.server_close()
+
+    def request(self, method, path, body=None, headers=None):
+        connection = http.client.HTTPConnection(*self.server.server_address, timeout=5)
+        try:
+            connection.request(method, path, body, headers or {})
+            response = connection.getresponse()
+            return (
+                response.status,
+                response.headers.get_content_type(),
+                response.headers,
+                response.read(),
+            )
+        finally:
+            connection.close()
+
+    def test_health_and_unknown_get_routes(self):
+        for path in ("/api/health", "/api/index?endpoint=health"):
+            with self.subTest(path=path):
+                status, media_type, _, body = self.request("GET", path)
+                self.assertEqual((status, media_type, json.loads(body)),
+                                 (200, "application/json", {"status": "ok"}))
+        status, media_type, _, body = self.request("GET", "/api/index?endpoint=unknown")
+        self.assertEqual((status, media_type), (404, "application/json"))
+        self.assertIn("error", json.loads(body))
+
+    def test_corners_warp_preview_and_pdf_routes(self):
+        page = np.zeros((200, 300, 3), np.uint8)
+        cv2.rectangle(page, (45, 20), (255, 180), (230, 230, 230), -1)
+        png = encode_page(page)
+
+        for path in ("/api/index?endpoint=corners", "/api/corners"):
+            with self.subTest(path=path):
+                status, media_type, _, body = self.request(
+                    "POST", path, png, {"Content-Type": "image/png"},
+                )
+                self.assertEqual((status, media_type), (200, "application/json"))
+                np.testing.assert_allclose(json.loads(body)["corners"],
+                                           [[45, 20], [255, 20], [255, 180], [45, 180]], atol=3)
+
+        corners = [[45, 20], [255, 20], [255, 180], [45, 180]]
+        status, media_type, _, body = self.request(
+            "POST",
+            "/api/index?endpoint=warp",
+            png,
+            {"Content-Type": "image/png", "X-Document-Corners": json.dumps(corners)},
+        )
+        self.assertEqual((status, media_type), (200, "image/png"))
+        warped = cv2.imdecode(np.frombuffer(body, np.uint8), cv2.IMREAD_COLOR)
+        self.assertEqual(warped.shape[:2], (161, 211))
+
+        status, media_type, _, body = self.request(
+            "POST",
+            "/api/index?endpoint=preview",
+            encode_page(warped),
+            {"Content-Type": "image/png", "X-Document-Mode": "grayscale"},
+        )
+        self.assertEqual((status, media_type), (200, "image/png"))
+        preview = cv2.imdecode(np.frombuffer(body, np.uint8), cv2.IMREAD_UNCHANGED)
+        self.assertEqual(preview.ndim, 2)
+
+        frame = len(png).to_bytes(4, "big") + png
+        status, media_type, resp_headers, pdf = self.request(
+            "POST",
+            "/api/index?endpoint=pdf",
+            frame,
+            {
+                "Content-Type": "application/octet-stream",
+                "X-Document-Mode": "color",
+                "X-Document-Page-Size": "a4",
+            },
+        )
+        self.assertEqual((status, media_type), (200, "application/pdf"))
+        self.assertEqual(resp_headers.get("Content-Disposition"),
+                         'attachment; filename="scan.pdf"')
+        with pdfium.PdfDocument(pdf) as document:
+            self.assertEqual(len(document), 1)
+            np.testing.assert_allclose(document[0].get_size(),
+                                       np.array([297, 210]) * 72 / 25.4, atol=0.01)
+
+    def test_same_origin_check(self):
+        png = encode_page(np.zeros((20, 20), np.uint8))
+        status, media_type, _, _ = self.request(
+            "POST",
+            "/api/index?endpoint=corners",
+            png,
+            {
+                "Content-Type": "image/png",
+                "Origin": "https://truescan-demo.vercel.app",
+                "X-Forwarded-Host": "truescan-demo.vercel.app",
+            },
+        )
+        self.assertEqual((status, media_type), (200, "application/json"))
+
+        status, media_type, _, body = self.request(
+            "POST",
+            "/api/index?endpoint=corners",
+            png,
+            {
+                "Content-Type": "image/png",
+                "Origin": "https://evil.example",
+                "X-Forwarded-Host": "truescan-demo.vercel.app",
+            },
+        )
+        self.assertEqual((status, media_type), (403, "application/json"))
+        self.assertIn("error", json.loads(body))

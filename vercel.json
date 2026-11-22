@@ -1,0 +1,28 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "",
+  "outputDirectory": "web",
+  "functions": {
+    "api/index.py": {
+      "excludeFiles": "{tests/**,docs/**,evaluation/**,web/**,node_modules/**,test-results/**}"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/:endpoint",
+      "destination": "/api/index?endpoint=:endpoint"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        }
+      ]
+    }
+  ]
+}
