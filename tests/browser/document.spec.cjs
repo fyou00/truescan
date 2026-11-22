@@ -3,8 +3,8 @@ const { existsSync, writeFileSync } = require("node:fs");
 const path = require("node:path");
 const { test, expect } = require("@playwright/test");
 
-async function addSheet(page, portrait, total, markerColor = portrait ? "#c75037" : "#244ca0") {
-    const data = await page.evaluate(({ vertical, markerColor }) => {
+async function addSheet(page, portrait, total, markerColor = portrait ? "#c75037" : "#244ca0", cornerMarks = false) {
+    const data = await page.evaluate(({ vertical, markerColor, cornerMarks }) => {
         const photo = document.createElement("canvas");
         const w = vertical ? 320 : 520;
         const h = vertical ? 460 : 300;
@@ -28,8 +28,17 @@ async function addSheet(page, portrait, total, markerColor = portrait ? "#c75037
         const x = w * (vertical ? 0.25 : 0.75);
         const y = h * (vertical ? 0.4 : 0.7);
         ctx.fillRect(x - 18, y - 14, 36, 28);
+        if (cornerMarks) {
+            for (const [left, top, color] of [
+                [4, 4, "#b02426"], [w - 18, 4, "#1e823b"],
+                [w - 18, h - 18, "#2743b0"], [4, h - 18, "#a522a8"],
+            ]) {
+                ctx.fillStyle = color;
+                ctx.fillRect(left, top, 14, 14);
+            }
+        }
         return photo.toDataURL("image/png").split(",")[1];
-    }, { vertical: portrait, markerColor });
+    }, { vertical: portrait, markerColor, cornerMarks });
     const detected = page.waitForResponse(response => response.url().endsWith("/api/corners"));
     await page.locator("#photo-file").setInputFiles({
         name: portrait ? "calibration.png" : "color.png", mimeType: "image/png",
@@ -63,25 +72,33 @@ async function readPreview(image, portrait, clockwiseTurns = 0) {
     }, { vertical: portrait, turns: clockwiseTurns });
 }
 
+async function downloadPdf(page, pdf) {
+    const pending = page.waitForEvent("download");
+    await page.locator("#download-pdf").click();
+    const download = await pending;
+    await download.saveAs(pdf);
+    expect(download.suggestedFilename()).toMatch(/\.pdf$/i);
+    return download.suggestedFilename();
+}
+
+function verifyPdf(script, ...args) {
+    const windows = process.platform === "win32";
+    const python = path.resolve(__dirname, "../..", ".venv", windows ? "Scripts/python.exe" : "bin/python");
+    execFileSync(existsSync(python) ? python : (windows ? "python" : "python3"), [
+        path.join(__dirname, script), ...args,
+    ]);
+}
+
 async function downloadAndCompare(page, testInfo, previews, mode, dimensions = []) {
     const previewPaths = previews.map(({ png }, i) => {
         const file = testInfo.outputPath(`preview-${i + 1}.png`);
         writeFileSync(file, Buffer.from(png, "base64"));
         return file;
     });
-    const pending = page.waitForEvent("download");
-    await page.locator("#download-pdf").click();
-    const download = await pending;
     const pdf = testInfo.outputPath("document.pdf");
-    await download.saveAs(pdf);
-    expect(download.suggestedFilename()).toMatch(/\.pdf$/i);
-
-    const windows = process.platform === "win32";
-    const python = path.resolve(__dirname, "../..", ".venv", windows ? "Scripts/python.exe" : "bin/python");
-    execFileSync(existsSync(python) ? python : (windows ? "python" : "python3"), [
-        path.join(__dirname, "verify_document.py"), pdf, mode, JSON.stringify(dimensions), ...previewPaths,
-    ]);
-    return download.suggestedFilename();
+    const name = await downloadPdf(page, pdf);
+    verifyPdf("verify_document.py", pdf, mode, JSON.stringify(dimensions), ...previewPaths);
+    return name;
 }
 
 test("reorder two corrected pages and download a PDF matching the grayscale previews", async ({ page }, testInfo) => {
@@ -234,5 +251,24 @@ test("download named PDFs and keep the corrected pages ready for the next export
             await page.locator("#document-panel").scrollIntoViewIfNeeded();
             await page.screenshot({ path: process.env.TRUESCAN_FILENAME_SCREENSHOT });
         }
+    }
+});
+
+test("fit marked portrait and landscape pages to A4 without cropping", async ({ page }, testInfo) => {
+    test.setTimeout(60_000);
+    await page.goto("/");
+    const sizes = [await addSheet(page, true, 1, "#c75037", true),
+                   await addSheet(page, false, 2, "#244ca0", true)];
+    const select = page.locator("#document-page-size");
+    await expect(select).toHaveValue("original");
+    const original = testInfo.outputPath("original.pdf");
+    await downloadPdf(page, original);
+    await select.selectOption("a4");
+    const a4 = testInfo.outputPath("a4.pdf");
+    await downloadPdf(page, a4);
+    verifyPdf("verify_a4.py", original, a4, JSON.stringify(sizes));
+    if (process.env.TRUESCAN_A4_SCREENSHOT) {
+        await page.locator("#document-panel").scrollIntoViewIfNeeded();
+        await page.screenshot({ path: process.env.TRUESCAN_A4_SCREENSHOT });
     }
 });

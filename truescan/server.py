@@ -12,7 +12,7 @@ import numpy as np
 
 from .corners import detectCorners
 from .enhance import enhancePage
-from .pdf import PAGE_MODES, exportPdf, renderPageMode
+from .pdf import PAGE_MODES, PAGE_SIZES, exportPdf, renderPageMode
 from .perspective import correctPerspective
 
 
@@ -171,7 +171,10 @@ class ScannerHandler(BaseHTTPRequestHandler):
                     raise RequestError(415, "Kirim urutan halaman dalam format biner.")
                 if length > MAX_DOCUMENT_BYTES:
                     raise RequestError(413, "Berkas dokumen terlalu besar.")
-                pdf = exportPdf(readDocumentPages(self.rfile, length), mode)
+                page_size = self.headers.get("X-Document-Page-Size", "original")
+                if page_size not in PAGE_SIZES:
+                    raise RequestError(400, "Ukuran halaman PDF tidak valid.")
+                pdf = exportPdf(readDocumentPages(self.rfile, length), mode, page_size=page_size)
                 self._reply(200, "application/pdf", pdf)
                 return
             if self.headers.get_content_type() != "image/png":

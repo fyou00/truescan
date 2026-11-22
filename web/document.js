@@ -4,6 +4,7 @@
   const list = document.getElementById("document-pages");
   const count = document.getElementById("page-count");
   const mode = document.getElementById("document-mode");
+  const pageSize = document.getElementById("document-page-size");
   const documentName = document.getElementById("document-name");
   const download = document.getElementById("download-pdf");
   const retry = document.getElementById("retry-previews");
@@ -99,6 +100,7 @@
     retry.disabled = busy;
     mode.disabled = busy;
     documentName.disabled = exporting;
+    pageSize.disabled = exporting;
     download.disabled = busy || Boolean(previewRequest) || !pages.length || pages.some(page => !page.url);
     pages.forEach((page, index) => {
       const number = index + 1;
@@ -279,7 +281,12 @@
         parts.push(length, page.blob);
       }
       const response = await fetch("/api/pdf", {
-        method: "POST", headers: { "Content-Type": "application/octet-stream", "X-Document-Mode": mode.value },
+        method: "POST",
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "X-Document-Mode": mode.value,
+          "X-Document-Page-Size": pageSize.value,
+        },
         body: new Blob(parts),
       });
       const pdf = await checkedBlob(response, "application/pdf");

@@ -10,6 +10,7 @@ from .binarize import binarizePage
 
 
 PAGE_MODES = ("color", "grayscale", "black-and-white")
+PAGE_SIZES = ("original", "a4")
 
 
 def renderPageMode(page: np.ndarray, mode: str) -> np.ndarray:
@@ -32,14 +33,16 @@ def renderPageMode(page: np.ndarray, mode: str) -> np.ndarray:
     return binarizePage(page)
 
 
-def exportPdf(pages: Iterable[np.ndarray], mode: str = "color") -> bytes:
-    """Return a PDF at 300 dpi using color, grayscale, or black-and-white pages.
+def exportPdf(pages: Iterable[np.ndarray], mode: str = "color", *, page_size: str = "original") -> bytes:
+    """Return a PDF using original page sizes at 300 dpi or centered images on A4.
 
     Each uint8 grayscale, BGR, or BGRA page retains its own pixel dimensions.
     Color conversion ignores alpha, matching the binarization stage.
     """
     if not isinstance(mode, str) or mode not in PAGE_MODES:
         raise ValueError("Expected mode 'color', 'grayscale' or 'black-and-white'")
+    if not isinstance(page_size, str) or page_size not in PAGE_SIZES:
+        raise ValueError("Expected page_size 'original' or 'a4'")
     if isinstance(pages, np.ndarray):
         raise ValueError("Pass a sequence of pages, such as [image]")
     try:
@@ -51,13 +54,25 @@ def exportPdf(pages: Iterable[np.ndarray], mode: str = "color") -> bytes:
     document.set_image_filter("FlateDecode")
     for page in iterator:
         pixels = renderPageMode(page, mode)
-        height, width = (dimension * 72 / 300 for dimension in pixels.shape[:2])
+        pixel_height, pixel_width = pixels.shape[:2]
+        if page_size == "original":
+            scale = 72 / 300
+            width, height = pixel_width * scale, pixel_height * scale
+        else:
+            mm = 72 / 25.4
+            width, height = 210 * mm, 297 * mm
+            if pixel_width > pixel_height:
+                width, height = height, width
+            margin = 10 * mm
+            scale = min((width - 2 * margin) / pixel_width, (height - 2 * margin) / pixel_height)
+        image_width, image_height = pixel_width * scale, pixel_height * scale
         document.add_page(format=(width, height))
         # PNG includes dimensions in fpdf2's cache key for differently shaped pages.
         success, png = cv2.imencode(".png", pixels)
         if not success:
             raise ValueError("Could not encode the document page")
-        document.image(png.tobytes(), x=0, y=0, w=width, h=height)
+        document.image(png.tobytes(), x=(width - image_width) / 2, y=(height - image_height) / 2,
+                       w=image_width, h=image_height)
     if not document.pages:
         raise ValueError("Select at least one document page")
     return bytes(document.output())

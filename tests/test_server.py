@@ -128,6 +128,21 @@ class ScannerServerTests(unittest.TestCase):
         self.assertEqual(result.shape, (160, 480))
         np.testing.assert_array_equal(np.unique(result), [0, 255])
 
+    def test_select_a4_for_pdf_download(self):
+        png = encode_page(np.full((160, 80), 220, np.uint8))
+        frame = len(png).to_bytes(4, "big") + png
+        headers = {"Content-Type": "application/octet-stream", "X-Document-Mode": "color",
+                   "X-Document-Page-Size": "a4"}
+        status, media_type, data = self.post("/api/pdf", frame, **headers)
+        self.assertEqual((status, media_type), (200, "application/pdf"))
+        with pdfium.PdfDocument(data) as document:
+            np.testing.assert_allclose(document[0].get_size(), np.array([210, 297]) * 72 / 25.4,
+                                       atol=0.01)
+        headers["X-Document-Page-Size"] = "letter"
+        status, media_type, data = self.post("/api/pdf", frame, **headers)
+        self.assertEqual((status, media_type), (400, "application/json"))
+        self.assertIn("error", json.loads(data))
+
     def test_invalid_pdf_batch(self):
         png = encode_page(np.zeros((20, 20), np.uint8))
         frame = len(png).to_bytes(4, "big") + png

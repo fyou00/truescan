@@ -22,6 +22,39 @@ def render_pages(data):
 
 
 class PdfTests(unittest.TestCase):
+    def test_a4_fits_full_resolution_pages_in_centered_print_area(self):
+        sources = []
+        for height, width in [(160, 80), (80, 160), (100, 100)]:
+            image = np.full((height, width, 3), 175, np.uint8)
+            for row in (0, 1):
+                for col in (0, 1):
+                    x, y = col * (width - 8), row * (height - 8)
+                    image[y:y + 8, x:x + 8] = (
+                        25 + 150 * row, 45 + 110 * col, 65 + 60 * (row + col))
+            sources.append(image)
+        with pdfium.PdfDocument(exportPdf(sources, page_size="a4")) as document:
+            self.assertEqual(len(document), len(sources))
+            for index, source in enumerate(sources):
+                rows, cols = source.shape[:2]
+                paper_mm = np.array([297, 210] if cols > rows else [210, 297])
+                scale_mm = min((paper_mm - 20) / [cols, rows])
+                inset_mm = (paper_mm - np.array([cols, rows]) * scale_mm) / 2
+                page = document[index]
+                np.testing.assert_allclose(page.get_size(), paper_mm * 72 / 25.4, atol=0.01)
+                image, = page.get_objects()
+                expected_box = np.concatenate([inset_mm, paper_mm - inset_mm]) * 72 / 25.4
+                np.testing.assert_allclose(image.get_bounds(), expected_box, atol=0.02)
+                np.testing.assert_array_equal(image.get_bitmap().to_numpy(), source)
+                rendered = page.render()
+                image_data = rendered.to_numpy()
+                np.testing.assert_array_equal(image_data[1, 1, :3], [255, 255, 255])
+                for y in [4, rows - 4]:
+                    for x in [4, cols - 4]:
+                        px, py = np.rint((inset_mm + [x * scale_mm, y * scale_mm]) * 72 / 25.4).astype(int)
+                        np.testing.assert_array_equal(image_data[py, px, :3], source[y, x])
+                rendered.close()
+                page.close()
+
     def test_default_color_and_selected_page_order(self):
         portrait = np.full((150, 100, 3), 245, np.uint8)
         portrait[15:45, 10:40] = (25, 50, 195)
@@ -81,3 +114,5 @@ class PdfTests(unittest.TestCase):
                 exportPdf(pages)
         with self.assertRaises(ValueError):
             exportPdf([valid], mode="sepia")
+        with self.assertRaisesRegex(ValueError, "page_size"):
+            exportPdf([valid], page_size="letter")
